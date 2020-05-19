@@ -1,7 +1,7 @@
 # coding: utf-8
 Gem::Specification.new do |spec|
   spec.name          = "rspec_tesults_formatter"
-  spec.version       = "1.0.1"
+  spec.version       = "1.1.0"
   spec.authors       = ["Ajeet Dhaliwal"]
   spec.email         = ["help@tesults.com"]
 

@@ -1,7 +1,7 @@
 require 'tesults'
 
 class TesultsFormatter
-  RSpec::Core::Formatters.register self, :example_finished, :dump_summary
+  RSpec::Core::Formatters.register self, :example_started, :example_finished, :dump_summary
 
   def filesForCase(suite, name)
     files = []
@@ -72,6 +72,16 @@ class TesultsFormatter
         :cases => []
       }
     }
+
+    @starttimes = {}
+  end
+
+  def example_started(notification)
+    if (@disabled == true) 
+      return
+    end
+    example = notification.example
+    @starttimes[example.id] = (Time.now.to_f * 1000).to_i
   end
 
   def example_finished(notification)
@@ -105,7 +115,9 @@ class TesultsFormatter
       :desc => desc,
       :suite => suite,
       :reason => reason,
-      :files => filesForCase(suite, example.description)
+      :files => filesForCase(suite, example.description),
+      :start =>  @starttimes[example.id],
+      :end => (Time.now.to_f * 1000).to_i
     })
 
     #@output.puts name + ": " + result
