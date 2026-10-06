@@ -1,0 +1,61 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            ruby-version: '2.7'
+            rspec-version: '3.9.0'
+          - os: ubuntu-latest
+            ruby-version: '3.4'
+            rspec-version: '3.13.2'
+          - os: windows-latest
+            ruby-version: '3.4'
+            rspec-version: '3.13.2'
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby-version }}
+      - run: gem install rspec --version "${{ matrix.rspec-version }}" --no-document
+      - run: gem install minitest --version "~> 5" --no-document
+      - run: ruby -Itest test/integration_test.rb
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+      - run: mkdir -p pkg
+      - run: gem build rspec_tesults_formatter.gemspec --output pkg/rspec_tesults_formatter-1.2.0.gem
+      - run: gem specification pkg/rspec_tesults_formatter-1.2.0.gem version --yaml
+      - run: gem install pkg/rspec_tesults_formatter-1.2.0.gem --no-document
+      - run: gem install rspec --version 3.13.2 --no-document
+      - run: mkdir -p tmp/package
+      - name: Run the installed gem
+        run: rspec --require rspec_tesults_formatter --format TesultsFormatter test/fixtures/package_spec.rb
+        env:
+          TESULTS_OUTPUT_FILE: ${{ github.workspace }}/tmp/package/results.json
+      - name: Validate installed-gem output
+        run: >-
+          ruby -rjson -e
+          "data = JSON.parse(File.read('tmp/package/results.json'));
+          abort 'wrong target' unless data['target'] == '';
+          abort 'wrong metadata' unless data['metadata'] == {
+          'integration_name' => 'rspec_tesults_formatter',
+          'integration_version' => '1.2.0',
+          'test_framework' => 'rspec' };
+          test_case = data['results']['cases'].first;
+          abort 'wrong result' unless test_case['result'] == 'pass';
+          abort 'missing location' unless test_case['_Location']"

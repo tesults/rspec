@@ -1,75 +1,53 @@
+require 'fileutils'
+require 'json'
 require 'tesults'
+require_relative 'rspec_tesults_formatter/version'
 
 class TesultsFormatter
   RSpec::Core::Formatters.register self, :example_started, :example_finished, :dump_summary
 
   def filesForCase(suite, name)
     files = []
-    if (@files == nil)
-      return files
-    end
+    return files if @files.nil?
+
     path = File.join(@files, suite, name)
-    if (File.directory?(path) != true)
-      return files
-    else 
-      Dir.foreach(path) do |filename|
-        next if filename == '.' or filename == '..' or filename == '.DS_Store'
-        files.push(File.join(path, filename))
-      end
+    return files unless File.directory?(path)
+
+    Dir.foreach(path) do |filename|
+      next if filename == '.' || filename == '..' || filename == '.DS_Store'
+
+      files.push(File.expand_path(File.join(path, filename)))
     end
-    return files
+    files
   end
 
   def initialize(output)
     @output = output
 
-    # args
-    @disabled = true
-    begin
-      @target = RSpec.configuration.tesults_target
-    rescue
-      @target = nil
-    end
-    begin
-      @files = RSpec.configuration.tesults_files
-    rescue
-      @files = nil
-    end
-    begin
-      @buildName = RSpec.configuration.tesults_build_name
-    rescue
-      @buildName = nil
-    end
-    begin 
-      @buildDesc = RSpec.configuration.tesults_build_desc
-    rescue
-      @buildDesc = nil
-    end
-    begin
-      @buildResult = RSpec.configuration.tesults_build_result
-      if (@buildResult != "pass" && @buildResult != "fail")
-        @buildResult = "unknown"
-      end
-    rescue
-      @buildResult = "unknown"
-    end
-    begin 
-      @buildReason = RSpec.configuration.tesults_build_reason
-    rescue
-      @buildReason = nil
-    end
+    @target = configuration_value(:tesults_target)
+    @files = configuration_value(:tesults_files)
+    @buildName = configuration_value(:tesults_build_name)
+    @buildDesc = configuration_value(:tesults_build_desc)
+    @buildResult = configuration_value(:tesults_build_result, 'unknown')
+    @buildResult = 'unknown' unless ['pass', 'fail'].include?(@buildResult)
+    @buildReason = configuration_value(:tesults_build_reason)
+    @outputFile = configuration_value(:tesults_output_file)
 
-    if (@target != nil)
-      @disabled = false
-    end
-    if (@disabled == true)
-      puts 'Tesults disabled. No target supplied.'
-    end
+    environmentOutputFile = ENV['TESULTS_OUTPUT_FILE']
+    @outputFile = environmentOutputFile unless blank?(environmentOutputFile)
+
+    @disabled = @target.nil? && blank?(@outputFile)
+    puts 'Tesults disabled. No target supplied.' if @disabled
 
     @data = {
       :target => @target,
       :results => {
         :cases => []
+      },
+      :metadata => {
+        :integration_name => 'rspec_tesults_formatter',
+        :integration_version => TesultsFormatter::VERSION,
+        :test_framework => 'rspec'
       }
     }
 
@@ -77,77 +55,106 @@ class TesultsFormatter
   end
 
   def example_started(notification)
-    if (@disabled == true) 
-      return
-    end
+    return if @disabled
+
     example = notification.example
     @starttimes[example.id] = (Time.now.to_f * 1000).to_i
   end
 
   def example_finished(notification)
-    if (@disabled == true) 
-      return
-    end
+    return if @disabled
+
     example = notification.example
     result = example.execution_result.status.to_s
-    if result == "passed"
-      result = "pass"
-    elsif result == "failed"
-      result = "fail"
+    if result == 'passed'
+      result = 'pass'
+    elsif result == 'failed'
+      result = 'fail'
     else
-      result = "unknown"
+      result = 'unknown'
     end
 
-    name = example.description
-    desc = example.metadata[:example_group][:description]
-    suite = example.metadata[:example_group][:parent_example_group][:description]
-    reason = example.exception
+    group = example.metadata[:example_group] || {}
+    parentGroup = group[:parent_example_group] || {}
+    desc = group[:description]
+    suite = parentGroup[:description] || ''
+    reason = example.exception.nil? ? '' : example.exception.to_s
 
-    if reason == nil
-      reason = ""
-    else
-      reason = reason.to_s
-    end
-
-    @data[:results][:cases].push({
+    testCase = {
       :name => example.description,
       :result => result,
       :desc => desc,
       :suite => suite,
       :reason => reason,
       :files => filesForCase(suite, example.description),
-      :start =>  @starttimes[example.id],
+      :start => @starttimes[example.id],
       :end => (Time.now.to_f * 1000).to_i
-    })
+    }
 
-    #@output.puts name + ": " + result
+    source = example.metadata[:file_path]
+    line = example.metadata[:line_number]
+    unless source.nil?
+      location = { :file => File.expand_path(source) }
+      location[:line] = line.to_i unless line.nil?
+      testCase[:_Location] = JSON.generate(location)
+    end
+
+    @data[:results][:cases].push(testCase)
   end
 
-  def dump_summary (message)
-    if (@disabled == true) 
-      return
-    end
-    if (@buildName != nil && @buildResult != nil)
+  def dump_summary(_message)
+    return if @disabled
+
+    if !@buildName.nil? && !@buildResult.nil?
       buildCase = {
         :name => @buildName,
-        :suite => "[build]",
+        :suite => '[build]',
         :result => @buildResult
       }
-      if (@buildDesc != nil)
-        buildCase[:desc] = @buildDesc
-      end
-      if (@buildReason != nil)
-        buildCase[:reason] = @buildReason
-      end
-      buildCase[:files] = filesForCase("[build]", @buildName)
+      buildCase[:desc] = @buildDesc unless @buildDesc.nil?
+      buildCase[:reason] = @buildReason unless @buildReason.nil?
+      buildCase[:files] = filesForCase('[build]', @buildName)
       @data[:results][:cases].push(buildCase)
     end
-    # Use this puts for debugging: puts(@data)
+
+    writeOutputFile
+    return if @target.nil?
+
     puts 'Uploading results to Tesults...'
     res = Tesults.upload(@data)
-    puts 'Success: ' + (res[:success] ? "true" : "false")
+    puts 'Success: ' + (res[:success] ? 'true' : 'false')
     puts 'Message: ' + res[:message]
     puts 'Warnings: ' + res[:warnings].length.to_s
     puts 'Errors: ' + res[:errors].length.to_s
+  end
+
+  private
+
+  def blank?(value)
+    value.nil? || value.to_s.empty?
+  end
+
+  def configuration_value(name, default = nil)
+    RSpec.configuration.public_send(name)
+  rescue StandardError
+    default
+  end
+
+  def writeOutputFile
+    return false if blank?(@outputFile)
+
+    begin
+      outputFile = File.expand_path(@outputFile)
+      FileUtils.mkdir_p(File.dirname(outputFile))
+      localData = @data.merge(:target => '')
+      File.open(outputFile, 'w') do |file|
+        file.write(JSON.generate(localData))
+      end
+      puts 'Tesults results written to ' + outputFile
+      true
+    rescue StandardError => error
+      puts 'Error writing Tesults results file: ' + error.to_s
+      false
+    end
   end
 end
