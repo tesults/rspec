@@ -27,7 +27,7 @@ jobs:
         with:
           ruby-version: ${{ matrix.ruby-version }}
       - run: gem install rspec --version "${{ matrix.rspec-version }}" --no-document
-      - run: gem install minitest --version "~> 5" --no-document
+      - run: gem install minitest --version "5.25.5" --no-document
       - run: ruby -Itest test/integration_test.rb
 
   package:

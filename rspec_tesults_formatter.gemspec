@@ -13,7 +13,7 @@ Gem::Specification.new do |spec|
   spec.files         = Dir["lib/**/*.rb", "LICENSE.txt", "README.md"]
   spec.add_development_dependency 'tesults', ["= 1.1.1"]
   spec.add_development_dependency 'rspec', [">= 3.9", "< 4"]
-  spec.add_development_dependency 'minitest', ["~> 5"]
+  spec.add_development_dependency 'minitest', ["~> 5.25.0"]
   spec.add_runtime_dependency 'tesults', ["= 1.1.1"]
   spec.license       = "MIT"
 end
